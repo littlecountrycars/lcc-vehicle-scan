@@ -16,12 +16,16 @@ Live: https://littlecountrycars.github.io/lcc-vehicle-scan/ (GitHub Pages from `
 A mode owner changes their own `modes/*.js` freely (wording, labels, defaults, keep days). Anything in the shared files affects every mode.
 
 ## How to make changes without stepping on each other
-1. **Never push straight to `main`.** Work on a branch named for the person and change (`simon/trade-offer-wording`), open a pull request.
-2. The **Demo truck test** (GitHub Actions, `tests/demo-test.js`) runs on every push and pull request: all three modes scan, idle, drive and show their result; Auction and Trade make no monday.com calls; mode 04 is never sent; old data carries over. Merge only when it's green.
-3. A change to a shared file (`obd.js`, `app.js`, `index.html`, `sw.js`) needs **Dylan** to approve the pull request. A change to the money math also needs **Jonathan**.
-4. Change only your own mode file unless the pull request says why.
-5. Bump `VERSION` in `sw.js` on every change that ships, so phones fetch the new files.
-6. Run `node tests/demo-test.js` locally before opening the pull request (`npm i --no-save playwright && npx playwright install chromium` once).
+Dylan is the product owner of Vehicle Scan.
+1. **Dylan may push straight to `main`** (it publishes) whenever he's ready; no review needed. Run the demo-truck test first.
+2. **Everyone else** (Simon, Jonathan's sessions, anyone new) works on a branch named for the person and change (`simon/trade-offer-wording`) and opens a pull request. Dylan reviews and merges.
+3. The **Demo truck test** (GitHub Actions, `tests/demo-test.js`) runs on every push and pull request: all three modes scan, idle, drive and show their result; Auction and Trade make no monday.com calls; mode 04 is never sent; old data carries over. If it goes red on `main`, fix it first.
+4. Changes to the money math (max bid, trade offer, red flags) or to the recon process: agree them with Jonathan (he has the final say on those), then push. No pull request needed for Dylan.
+5. Change only your own mode file unless the pull request says why.
+6. Bump `VERSION` in `sw.js` on every change that ships, so phones fetch the new files.
+7. Run `node tests/demo-test.js` locally before pushing (`npm i --no-save playwright && npx playwright install chromium` once).
+
+When the session belongs to someone other than Dylan, use a branch and a pull request even if git would allow a direct push.
 
 ## Modes
 - **Check-In** (`checkin`): a vehicle LCC bought arrives. Stock # = last 6 of the VIN. Full test drive. Day-1 estimate. Sends to monday.com Inventory Recon; over $1,000 notifies Jonathan. Kept on the phone 30 days.
