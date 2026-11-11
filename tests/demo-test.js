@@ -26,7 +26,11 @@ async function runMode(browser, base, mode) {
   const page = await ctx.newPage();
   const monday = [], errors = [];
   await page.route('https://api.monday.com/**', (r) => { monday.push(r.request().url()); r.abort(); });
-  await page.route(/nhtsa\.(dot\.)?gov|fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  // Auction: pretend the VIN decodes as a SuperCab so the SuperCab rule is exercised
+  await page.route(/vpic\.nhtsa\.dot\.gov/, (r) => mode === 'auction'
+    ? r.fulfill({ contentType: 'application/json', body: JSON.stringify({ Results: [{ ModelYear: '2018', Make: 'FORD', Model: 'F-150', Trim: 'XLT', BodyCabType: 'Extra/Super/Quad/Double/King/Extended', DisplacementL: '5.0', EngineCylinders: '8' }] }) })
+    : r.abort());
+  await page.route(/api\.nhtsa\.gov|fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   page.on('pageerror', (e) => errors.push(e.message));
   // Record every command the app sends to the (demo) scanner
   await page.addInitScript(() => {
@@ -71,7 +75,13 @@ async function runMode(browser, base, mode) {
     if (mode === 'trade') {
       ok(await page.isVisible('#callEquity'), 'payoff/equity shown: ' + await page.textContent('#callEquity'));
       ok(await page.isVisible('#custBtn'), 'customer copy button shown');
-    } else ok(!(await page.isVisible('#custBtn')), 'no customer copy button');
+    } else {
+      ok(!(await page.isVisible('#custBtn')), 'no customer copy button');
+      const flags = await page.textContent('#flags');
+      ok(/Engine misfire: your rule is never buy/.test(flags), 'misfire on the demo truck = never-buy flag');
+      ok((await page.textContent('#callWord')) === 'Walk away', 'call is Walk away');
+      ok(/SuperCab cushion/.test(await page.textContent('#bidMath')), 'SuperCab cushion taken off the max bid');
+    }
   }
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, mode + '.png'), fullPage: true });
   if (mode !== 'checkin') { await page.click('#nextBtn'); await page.waitForTimeout(300); ok(!(await page.isVisible('#resultCard')), 'next vehicle clears the screen'); }
