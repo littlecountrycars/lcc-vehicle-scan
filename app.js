@@ -15,7 +15,11 @@
   const JONATHAN = '101601751';
 
   const LEVEL_WORD = { good: 'Good to go', watch: 'Needs a look', problem: 'Needs work' };
-  const LS = { settings: 'lccVS.settings', hist: 'lccVS.history', port: 'lccVS.lastTransport', mode: 'lccVS.mode', migrated: 'lccVS.migrated' };
+  // The test copy (littlecountrycars.github.io/lcc-vehicle-scan-test/) runs this same code. It shares the website,
+  // so it keeps its own saved data under lccVST.* and never touches the live app's lccVS.* data.
+  const TEST = /-test\//.test(location.pathname);
+  const P = TEST ? 'lccVST.' : 'lccVS.';
+  const LS = { settings: P + 'settings', hist: P + 'history', port: P + 'lastTransport', mode: P + 'mode', migrated: P + 'migrated' };
   const SCOUT_URL = 'https://claude.ai/artifact/6bBGxC5drP42KJE9sGJYgZ';
 
   const store = {
@@ -27,6 +31,14 @@
      Reads only; the old keys are left alone. */
   function migrate() {
     if (store.get(LS.migrated, false)) return;
+    if (TEST) {
+      // Test copy: borrow the live app's name, monday token and settings once. Scan history stays separate.
+      const live = store.get('lccVS.settings', null);
+      if (live) store.set(LS.settings, JSON.parse(JSON.stringify(live)));
+      const m = store.get('lccVS.mode', null); if (m) store.set(LS.mode, m);
+      store.set(LS.migrated, true);
+      return;
+    }
     const s = store.get(LS.settings, null) || {};
     const ci = store.get('lccScan.settings', null), acq = store.get('lccAcq.settings', null);
     if (ci) { s.name = s.name || ci.name || ''; s.token = s.token || ci.token || ''; if (s.fill == null && ci.fill != null) s.fill = ci.fill; }
@@ -51,6 +63,13 @@
     store.set(LS.migrated, true);
   }
   migrate();
+  if (TEST) {
+    document.title = 'TEST ' + document.title;
+    document.documentElement.classList.add('is-test');
+    const b = document.createElement('div'); b.className = 'testbar'; b.setAttribute('role', 'note');
+    b.textContent = 'TEST APP \u00b7 changes here aren\u2019t live yet';
+    document.body.prepend(b);
+  }
 
   let settings = Object.assign({ name: '', token: '', fill: true, per: {} }, store.get(LS.settings, {}));
   const urlMode = new URLSearchParams(location.search).get('mode');
@@ -924,10 +943,19 @@
       l.append(s, b); ul.appendChild(l);
     }
   }
+  let testArmedAt = 0;
   async function send(rec, opts = {}) {
     rec = rec || current;
     if (!rec || rec.demo || (rec.mode && rec.mode !== 'checkin')) return;
-    const msg = $('sendMsg'); msg.className = 'notice'; msg.textContent = 'Sending\u2026'; show(msg);
+    const msg = $('sendMsg');
+    if (TEST && Date.now() - testArmedAt > 8000) {
+      testArmedAt = Date.now();
+      msg.className = 'notice err'; show(msg);
+      msg.textContent = 'This is the TEST app, but it posts to the real Inventory Recon board. Tap Send again within 8 seconds to send it.';
+      return;
+    }
+    testArmedAt = 0;
+    msg.className = 'notice'; msg.textContent = 'Sending\u2026'; show(msg);
     $('sendBtn').disabled = true;
     try {
       rec.notes = opts.fromHistory ? rec.notes : $('notes').value.trim();
