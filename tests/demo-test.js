@@ -78,7 +78,8 @@ async function runMode(browser, base, mode) {
     } else {
       ok(!(await page.isVisible('#custBtn')), 'no customer copy button');
       const flags = await page.textContent('#flags');
-      ok(!/your rule is never buy/.test(flags) && /Misfires on cylinder/.test(flags), 'in-person auction: misfire is a caution, not a never-buy');
+      ok(/Engine misfire/.test(flags) && !/your rule is never buy/.test(flags), 'misfire flagged as a caution, not a never-buy');
+      ok(/− \$1,500/.test(await page.textContent('#bidMath')), 'SuperCab cushion is $1,500');
       ok(/SuperCab cushion/.test(await page.textContent('#bidMath')), 'SuperCab cushion taken off the max bid');
     }
   }

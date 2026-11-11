@@ -628,16 +628,19 @@
     const R = modeOf(rec).rules || {};
     const misCodes = codes.filter(isMisfireCode), camCodes = codes.filter(isCamCode);
     const misIdle = rec.idleAssessment ? rec.idleAssessment.findings.filter((f) => /^(A few )?misfires on cylinder/i.test(f.title)) : [];
-    if (R.misfireWalk && (misCodes.length || misIdle.some((f) => f.level === 'problem')))
-      add('hard', 'Engine misfire: your rule is never buy', [misCodes.join(', '), misIdle.filter((f) => f.level === 'problem').map((f) => f.title).join(', ')].filter(Boolean).join('; ') + '.');
-    else if (R.misfireWalk && misIdle.length) add('soft', 'A few misfires counted at idle', misIdle.map((f) => f.title).join(', ') + '. Not a code yet; recheck idle or walk if in doubt.');
+    // Misfires are always flagged; a mode can make them a walk-away with rules.misfireWalk
+    const misBad = misCodes.length || misIdle.some((f) => f.level === 'problem');
+    const eng = rec.decoded && rec.decoded.engine ? ' Engine: ' + rec.decoded.engine + '.' : '';
+    const misDetail = [misCodes.map((c) => c + ' ' + OBD.describeCode(c)).join(', '), misIdle.map((f) => f.title).join(', ')].filter(Boolean).join('; ') + '.' + eng;
+    if (misBad) add(R.misfireWalk ? 'hard' : 'soft', R.misfireWalk ? 'Engine misfire: your rule is never buy' : 'Engine misfire', misDetail);
+    else if (misIdle.length) add('soft', 'A few misfires counted at idle', misDetail + ' Not a code yet; recheck the idle.');
     if (R.camshaftWalk && camCodes.length) add('hard', 'Camshaft code: your rule is never buy', camCodes.map((c) => c + ' ' + OBD.describeCode(c)).join('; '));
     if (R.superCabCushion && isSuperCab(rec)) add('soft', 'SuperCab', 'Only worth it way under: max bid already has ' + money(R.superCabCushion) + ' extra taken off.');
-    const ruled = new Set([...(R.misfireWalk ? misCodes : []), ...(R.camshaftWalk ? camCodes : [])]);
+    const ruled = new Set([...misCodes, ...(R.camshaftWalk ? camCodes : [])]);
     const big = codes.filter((c) => OBD.fixFor(c).tier === '$$$' && !/^P0(7|8)/.test(c) && !ruled.has(c));
     if (big.length) add('soft', 'Big-ticket code' + (big.length > 1 ? 's' : ''), big.map((c) => c + ' ' + OBD.describeCode(c)).join('; '));
     const ia = rec.idleAssessment;
-    if (ia) ia.findings.forEach((f) => { if (f.level === 'problem' && /Misfire|Rough|lean|rich/i.test(f.title) && !(R.misfireWalk && /misfires on cylinder/i.test(f.title))) add('soft', f.title, ''); });
+    if (ia) ia.findings.forEach((f) => { if (f.level === 'problem' && /Misfire|Rough|lean|rich/i.test(f.title) && !/misfires on cylinder/i.test(f.title)) add('soft', f.title, ''); });
     const da = rec.driveAssessment;
     if (da) da.findings.forEach((f) => { if (f.level === 'problem') add(/flared|wavering/i.test(f.title) ? 'hard' : 'soft', f.title, ''); });
     if (rec.crankAssessment) rec.crankAssessment.findings.forEach((f) => { if (f.level === 'problem') add('soft', f.title, ''); });

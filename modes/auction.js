@@ -36,9 +36,9 @@
   calls: { good: 'Bid', watch: 'Caution', problem: 'Walk away' },
   // Jonathan's buying rules (he signs off on changes):
   rules: {
-    misfireWalk: false,          // never-buy for misfires applies to ONLINE auctions only; in person Jonathan judges it himself
+    misfireWalk: false,          // misfires are flagged (Caution) but don't rule a truck out in person. Possible later: 5.0 V8 misfire = walk, once the misfire readings are proven
     camshaftWalk: true,          // never buy with camshaft codes
-    superCabCushion: 3000        // SuperCabs only if at least $3,000 under max bid: taken off the max bid
+    superCabCushion: 1500        // SuperCabs: $1,500 more off the max bid, on top of the minimum profit
   },
   scout: true,
 
