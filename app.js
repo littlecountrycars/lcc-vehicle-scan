@@ -408,7 +408,7 @@
       const j = await res.json(); const v = j.Results && j.Results[0];
       if (!v || !v.ModelYear) return;
       const eng = [v.DisplacementL ? (+v.DisplacementL).toFixed(1) + 'L' : '', v.EngineCylinders ? 'V' + v.EngineCylinders : '', /diesel/i.test(v.FuelTypePrimary || '') ? 'diesel' : ''].filter(Boolean).join(' ');
-      rec.decoded = { year: v.ModelYear, make: v.Make, model: v.Model, trim: v.Trim || v.Series || '', engine: eng, drive: v.DriveType || '',
+      rec.decoded = { year: v.ModelYear, make: v.Make, model: v.Model, trim: v.Trim || v.Series || '', engine: eng, drive: v.DriveType || '', cab: v.BodyCabType || '',
         label: [v.ModelYear, titleCase(v.Make), v.Model, v.Trim].filter(Boolean).join(' ') + (eng ? ' \u00b7 ' + eng : '') };
       if (rec === current) { renderScan(); renderEstimate(); suggestName(); if (isBid()) { renderBid(); renderCall(); } }
       updateHist(rec);
@@ -596,6 +596,12 @@
 
   /* ---------- red flags, the call, max bid / trade offer (Auction and Trade) ---------- */
   function modeOf(rec) { return MODES[rec && rec.mode] || M; }
+  const isMisfireCode = (c) => /^P03(0\d|1[0-6])$/.test(c);                             // P0300-P0316
+  const isCamCode = (c) => /^P00(1\d|2[0-5])$|^P03(4\d|6[5-9]|9[0-4])$/.test(c);       // cam timing/actuator, cam position sensors
+  function isSuperCab(rec) {
+    const d = rec.decoded || {};
+    return /super\s*cab|extended|extra\/super/i.test(d.cab || '') || /supercab/i.test((d.trim || '') + ' ' + (d.model || ''));
+  }
   function redFlags(rec) {
     const F = []; const add = (sev, title, detail) => F.push({ sev, title, detail: detail || '' });
     const s = rec.scan || {}, st = s.status;
@@ -618,10 +624,23 @@
       else if (/Transmission/.test(m.name) && m.codes.some((c) => c.active)) add('hard', 'Transmission module fault', m.codes.map((c) => c.code).join(', '));
       else if (/ABS|steering|4x4/i.test(m.name) && m.codes.some((c) => c.active)) add('soft', m.name + ' fault', m.codes.map((c) => c.code).join(', '));
     });
-    const big = codes.filter((c) => OBD.fixFor(c).tier === '$$$' && !/^P0(7|8)/.test(c));
+    // Mode buying rules (Auction: Jonathan's never-buy list)
+    const R = modeOf(rec).rules || {};
+    const misCodes = codes.filter(isMisfireCode), camCodes = codes.filter(isCamCode);
+    const misIdle = rec.idleAssessment ? rec.idleAssessment.findings.filter((f) => /^(A few )?misfires on cylinder/i.test(f.title)) : [];
+    // Misfires are always flagged; a mode can make them a walk-away with rules.misfireWalk
+    const misBad = misCodes.length || misIdle.some((f) => f.level === 'problem');
+    const eng = rec.decoded && rec.decoded.engine ? ' Engine: ' + rec.decoded.engine + '.' : '';
+    const misDetail = [misCodes.map((c) => c + ' ' + OBD.describeCode(c)).join(', '), misIdle.map((f) => f.title).join(', ')].filter(Boolean).join('; ') + '.' + eng;
+    if (misBad) add(R.misfireWalk ? 'hard' : 'soft', R.misfireWalk ? 'Engine misfire: your rule is never buy' : 'Engine misfire', misDetail);
+    else if (misIdle.length) add('soft', 'A few misfires counted at idle', misDetail + ' Not a code yet; recheck the idle.');
+    if (R.camshaftWalk && camCodes.length) add('hard', 'Camshaft code: your rule is never buy', camCodes.map((c) => c + ' ' + OBD.describeCode(c)).join('; '));
+    if (R.superCabCushion && isSuperCab(rec)) add('soft', 'SuperCab', 'Only worth it way under: max bid already has ' + money(R.superCabCushion) + ' extra taken off.');
+    const ruled = new Set([...misCodes, ...(R.camshaftWalk ? camCodes : [])]);
+    const big = codes.filter((c) => OBD.fixFor(c).tier === '$$$' && !/^P0(7|8)/.test(c) && !ruled.has(c));
     if (big.length) add('soft', 'Big-ticket code' + (big.length > 1 ? 's' : ''), big.map((c) => c + ' ' + OBD.describeCode(c)).join('; '));
     const ia = rec.idleAssessment;
-    if (ia) ia.findings.forEach((f) => { if (f.level === 'problem' && /Misfire|Rough|lean|rich/i.test(f.title)) add('soft', f.title, ''); });
+    if (ia) ia.findings.forEach((f) => { if (f.level === 'problem' && /Misfire|Rough|lean|rich/i.test(f.title) && !/misfires on cylinder/i.test(f.title)) add('soft', f.title, ''); });
     const da = rec.driveAssessment;
     if (da) da.findings.forEach((f) => { if (f.level === 'problem') add(/flared|wavering/i.test(f.title) ? 'hard' : 'soft', f.title, ''); });
     if (rec.crankAssessment) rec.crankAssessment.findings.forEach((f) => { if (f.level === 'problem') add('soft', f.title, ''); });
@@ -633,9 +652,11 @@
     if (!sale) return null;
     const p = per(modeOf(rec).id);
     const recon = estTotal(rec), profit = p.minProfit, fees = p.fees;
-    const bid = sale - recon - profit - fees;
+    const R = modeOf(rec).rules || {};
+    const cushion = R.superCabCushion && isSuperCab(rec) ? R.superCabCushion : 0;
+    const bid = sale - recon - profit - fees - cushion;
     const payoff = +rec.payoff || 0;
-    return { sale, recon, profit, fees, bid, payoff, equity: payoff ? bid - payoff : null };
+    return { sale, recon, profit, fees, cushion, bid, payoff, equity: payoff ? bid - payoff : null };
   }
   function theCall(rec) {
     const m = modeOf(rec), words = m.calls || { good: 'Bid', watch: 'Caution', problem: 'Walk away' };
@@ -676,6 +697,7 @@
     row(M.estimateName + ' (this vehicle)', '\u2212 ' + money(mb.recon));
     row(M.id === 'trade' ? 'Gross wanted' : 'Minimum profit', '\u2212 ' + money(mb.profit));
     if (mb.fees) row(M.feesName, '\u2212 ' + money(mb.fees));
+    if (mb.cushion) row('SuperCab cushion', '\u2212 ' + money(mb.cushion));
     row(M.resultName, mb.bid > 0 ? money(mb.bid) : 'None', 'tot');
     if (mb.equity != null) { row('Payoff', '\u2212 ' + money(mb.payoff)); row(mb.equity >= 0 ? 'Customer equity' : 'Upside down', money(Math.abs(mb.equity)), 'tot'); }
   }
@@ -779,7 +801,7 @@
       const call = theCall(rec);
       L.push('<b>' + esc(call.word.toUpperCase()) + '</b>' + (call.mb ? ' \u00b7 ' + m.resultName + ' ' + esc(call.mb.bid > 0 ? money(call.mb.bid) : 'none') : '') + (rec.stock ? ' \u00b7 ' + esc(m.stockLabel) + ' ' + esc(rec.stock) : ''));
       if (call.flags.length) L.push('<b>Red flags:</b><ul>' + call.flags.map((f) => '<li>' + esc(f.title) + (f.detail ? ' \u2014 ' + esc(f.detail) : '') + '</li>').join('') + '</ul>');
-      if (call.mb) L.push(m.resultName + ' math: sale ' + money(call.mb.sale) + ' \u2212 recon ' + money(call.mb.recon) + ' \u2212 ' + (m.id === 'trade' ? 'gross ' : 'profit ') + money(call.mb.profit) + (call.mb.fees ? ' \u2212 ' + esc(m.feesName.toLowerCase()) + ' ' + money(call.mb.fees) : '') + ' = ' + (call.mb.bid > 0 ? money(call.mb.bid) : 'none') +
+      if (call.mb) L.push(m.resultName + ' math: sale ' + money(call.mb.sale) + ' \u2212 recon ' + money(call.mb.recon) + ' \u2212 ' + (m.id === 'trade' ? 'gross ' : 'profit ') + money(call.mb.profit) + (call.mb.fees ? ' \u2212 ' + esc(m.feesName.toLowerCase()) + ' ' + money(call.mb.fees) : '') + (call.mb.cushion ? ' \u2212 SuperCab cushion ' + money(call.mb.cushion) : '') + ' = ' + (call.mb.bid > 0 ? money(call.mb.bid) : 'none') +
         (call.mb.equity != null ? '. Payoff ' + money(call.mb.payoff) + ', ' + (call.mb.equity >= 0 ? 'equity ' + money(call.mb.equity) : 'upside down ' + money(-call.mb.equity)) : ''));
     }
     L.push('<b>' + (cust ? 'Vehicle health check' : m.id === 'checkin' ? 'OBD2 check-in scan' : 'Scan health') + ': ' + esc(LEVEL_WORD[a.overall]) + '</b>');

@@ -34,6 +34,12 @@
   minProfit: 2500,               // per Jonathan: $2,500 minimum profit after recon
   fees: 0,
   calls: { good: 'Bid', watch: 'Caution', problem: 'Walk away' },
+  // Jonathan's buying rules (he signs off on changes):
+  rules: {
+    misfireWalk: false,          // misfires are flagged (Caution) but don't rule a truck out in person. Possible later: 5.0 V8 misfire = walk, once the misfire readings are proven
+    camshaftWalk: true,          // never buy with camshaft codes
+    superCabCushion: 1500        // SuperCabs: $1,500 more off the max bid, on top of the minimum profit
+  },
   scout: true,
 
   destination: 'phone',
