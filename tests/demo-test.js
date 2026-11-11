@@ -11,7 +11,8 @@ const { chromium } = require('playwright');
 const ROOT = path.resolve(__dirname, '..');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const server = http.createServer((req, res) => {
-  let p = decodeURIComponent(req.url.split('?')[0]); if (p.endsWith('/')) p += 'index.html';
+  // Also serve the app under /lcc-vehicle-scan-test/ to check the test copy keeps its own data
+  let p = decodeURIComponent(req.url.split('?')[0]).replace(/^\/lcc-vehicle-scan-test\//, '/'); if (p.endsWith('/')) p += 'index.html';
   const f = path.join(ROOT, p);
   if (!f.startsWith(ROOT) || !fs.existsSync(f)) { res.writeHead(404); return res.end(); }
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res);
@@ -107,12 +108,36 @@ async function migration(browser, base) {
   await ctx.close();
 }
 
+async function testCopy(browser, base) {
+  console.log('\ntest copy');
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 900 } });
+  const page = await ctx.newPage();
+  await page.route(/nhtsa\.(dot\.)?gov|fonts\.(googleapis|gstatic)\.com|api\.monday\.com/, (r) => r.abort());
+  await page.goto(base + 'tests/blank.html');
+  await page.evaluate(() => {
+    localStorage.setItem('lccVS.settings', JSON.stringify({ name: 'Dylan', token: 'tok', fill: true, per: {} }));
+    localStorage.setItem('lccVS.history', JSON.stringify([{ id: 'live1', mode: 'checkin', at: new Date().toISOString(), assessment: { overall: 'good', findings: [] }, scan: {} }]));
+    localStorage.setItem('lccVS.mode', JSON.stringify('checkin'));
+  });
+  await page.goto(base + 'lcc-vehicle-scan-test/?mode=auction');
+  ok(await page.isVisible('.testbar'), 'TEST banner shows');
+  const st = await page.evaluate(() => JSON.parse(localStorage.getItem('lccVST.settings')));
+  ok(st && st.token === 'tok', 'test copy borrows the live token');
+  const lv = await page.evaluate(() => ({ h: JSON.parse(localStorage.getItem('lccVS.history')), m: JSON.parse(localStorage.getItem('lccVS.mode')), th: localStorage.getItem('lccVST.history') }));
+  ok(lv.h.length === 1 && lv.h[0].id === 'live1' && lv.m === 'checkin', 'live app data untouched (history and mode)');
+  ok(!lv.th || !JSON.parse(lv.th).some((r) => r.id === 'live1'), 'test copy keeps its own history');
+  await page.goto(base);
+  ok(!(await page.isVisible('.testbar')), 'no TEST banner on the live address');
+  await ctx.close();
+}
+
 (async () => {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://localhost:' + server.address().port + '/';
   const browser = await chromium.launch();
   try {
     await migration(browser, base);
+    await testCopy(browser, base);
     for (const m of (process.env.MODES || 'checkin auction trade').split(' ')) await runMode(browser, base, m);
   } catch (e) { console.log('  FAIL ' + e.message); failed++; }
   await browser.close(); server.close();

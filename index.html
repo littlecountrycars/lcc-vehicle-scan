@@ -28,6 +28,8 @@ body { background: var(--bg); color: var(--fg); font-family: var(--font-body); f
   padding-bottom: calc(24px + env(safe-area-inset-bottom)); -webkit-tap-highlight-color: transparent; }
 h1, h2, h3, .kpi { font-family: var(--font-head); font-weight: 400; margin: 0; letter-spacing: .01em; }
 button, input, textarea { font: inherit; color: inherit; }
+.testbar { background: #000; color: var(--lcc-orange); font: 700 13px/1 Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; text-align: center; padding: 8px 12px; }
+.is-test .top { border-bottom: 3px solid var(--lcc-orange); }
 .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px;
   padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: var(--bg); border-bottom: 2px solid var(--fg); }
 .top .mark { width: 34px; height: 34px; flex: none; }
