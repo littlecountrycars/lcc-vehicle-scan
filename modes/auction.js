@@ -36,7 +36,7 @@
   calls: { good: 'Bid', watch: 'Caution', problem: 'Walk away' },
   // Jonathan's buying rules (he signs off on changes):
   rules: {
-    misfireWalk: true,           // never buy with an engine misfire (misfire code, or misfires counted at idle)
+    misfireWalk: false,          // never-buy for misfires applies to ONLINE auctions only; in person Jonathan judges it himself
     camshaftWalk: true,          // never buy with camshaft codes
     superCabCushion: 3000        // SuperCabs only if at least $3,000 under max bid: taken off the max bid
   },
