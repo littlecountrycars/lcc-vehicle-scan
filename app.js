@@ -71,7 +71,9 @@
     document.body.prepend(b);
   }
 
-  let settings = Object.assign({ name: '', token: '', fill: true, per: {} }, store.get(LS.settings, {}));
+  let settings = Object.assign({ name: '', token: '', fill: true, per: {}, claudeKey: '', talk: true }, store.get(LS.settings, {}));
+  const G = window.LCCGlasses;
+  G.setVoice(settings.talk);
   const urlMode = new URLSearchParams(location.search).get('mode');
   let modeId = MODES[urlMode] ? urlMode : (MODES[store.get(LS.mode, '')] ? store.get(LS.mode, '') : null);
   let M = MODES[modeId] || MODES.checkin;
@@ -196,6 +198,12 @@
       $('mathNote').textContent = M.resultName + ' = ' + M.priceLabel.toLowerCase() + ' \u2212 ' + M.estimateName.toLowerCase() + ' \u2212 ' + $('profitLabel').textContent.toLowerCase() + ' \u2212 ' + M.feesName.toLowerCase() + '.';
     }
     show($('scoutBtn'), !!M.scout); show($('scoutCallBtn'), !!M.scout);
+    const g = M.glasses; show($('glassCard'), !!g);
+    if (g) {
+      $('glassTitle').textContent = g.title; $('glassIntro').textContent = g.intro; $('glassPick').textContent = g.pick;
+      show($('coachRow'), g.kind === 'walkaround'); if (g.kind === 'walkaround' && g.coachBtn) $('walkCoachBtn').textContent = g.coachBtn;
+      if (g.coachBtn && g.coachPrompt) $('coachBtn').textContent = g.coachBtn;
+    }
     $('phoneNote').textContent = 'Every ' + M.record + ' is saved on this phone under Recent ' + M.records + '. Nothing is sent anywhere unless you share it.';
     $('histTitle').textContent = 'Recent ' + M.records;
     $('keepLabel').textContent = 'Keep ' + M.records + ' on this phone';
@@ -341,11 +349,20 @@
       const miles = typed || (r.odometerMi ? Math.round(r.odometerMi) : null);
       const a = buildAssessment(r, typed);
       const typedStock = $('stock').value.trim().toUpperCase();
+      // What the glasses read before the scanner was plugged in comes along, if it's the same vehicle
+      let carry = current && current.mode === M.id && (current.noScan || current.walk || current.photo) ? current : null;
+      if (carry && carry.vin && r.vin && carry.vin !== r.vin) carry = null;
       current = {
         id: Date.now().toString(36), at: r.at, mode: M.id, demo: transport.name === 'Demo', tech: settings.name || '',
         vin: r.vin, stock: typedStock || (M.stockFromVin ? OBD.stockFromVin(r.vin) || '' : ''), miles,
         scan: r, assessment: a, idle: null, idleAssessment: null, decoded: null, sent: null
       };
+      if (carry) {
+        ['walk', 'photo', 'salePrice', 'payoff', 'notes', 'coach'].forEach((k) => { if (carry[k] != null) current[k] = carry[k]; });
+        if (!current.vin && carry.vin) current.vin = carry.vin;
+        if (!current.stock && carry.stock) current.stock = carry.stock;
+        if (carry.noScan) store.set(LS.hist, store.get(LS.hist, []).filter((x) => x.id !== carry.id));
+      }
       if (!typedStock && current.stock) $('stock').value = current.stock;
       if (!typed && miles) $('miles').value = miles;
       current.milesSource = typed ? 'dash' : (miles ? 'truck' : null);
@@ -361,9 +378,9 @@
       prepIdle();
       show($('driveCard')); show($('driveResult'), false); show($('driveLive'), false);
       show($('sendCard'));
-      current.estimate = { lines: [], removed: [] };
+      current.estimate = carry && carry.estimate ? { lines: carry.estimate.lines.filter((l) => l.manual), removed: carry.estimate.removed.slice() } : { lines: [], removed: [] };
       renderEstimate();
-      $('notes').value = ''; $('salePrice').value = ''; $('payoff').value = '';
+      $('notes').value = current.notes || ''; $('salePrice').value = current.salePrice || ''; $('payoff').value = current.payoff || '';
       if (isBid()) { renderBid(); renderCall(); }
       if (isMonday()) lookupMatch();
       return true;
@@ -381,6 +398,7 @@
   }
 
   function renderScan() {
+    if (current.noScan) return; // glasses-only record: nothing scanned yet
     const r = current.scan, a = current.assessment;
     const codes = (r.stored || []).length + (r.pending || []).length;
     renderVerdict($('verdict'), a.overall, codes ? codes + ' trouble code' + (codes > 1 ? 's' : '') + ' found' : 'No trouble codes stored');
@@ -573,6 +591,7 @@
       if (/Ran hot/i.test(f.title)) add('cooling', 'Cooling system', [200, 800], 'thermostat, coolant');
       if (f.code && !codes.has(f.code)) { const fx = OBD.fixFor(f.code); add('code:' + f.code, f.code + ' ' + OBD.describeCode(f.code), fx.range, fx.parts.join(', ')); }
     }
+    if (rec.walk) rec.walk.recon.forEach((x, i) => { const lo = Math.max(0, +x.low || 0); add('walk:' + i + ':' + x.item, x.item, [lo, Math.max(lo, +x.high || 0)], 'from the glasses walkaround'); });
     return L;
   }
   function renderEstimate() {
@@ -617,7 +636,9 @@
   function modeOf(rec) { return MODES[rec && rec.mode] || M; }
   function redFlags(rec) {
     const F = []; const add = (sev, title, detail) => F.push({ sev, title, detail: detail || '' });
-    const s = rec.scan || {}, st = s.status;
+    const s = rec.scan || {}, st = s.status, m = modeOf(rec);
+    if (rec.noScan) add('soft', 'Not scanned yet', 'Plug in the scanner for codes, battery and idle.');
+    if (rec.photo) rec.photo.flags.forEach((f) => add(f.hard ? 'hard' : 'soft', f.title, 'From the glasses photo.'));
     const recent = (s.distSinceClearMi != null && s.distSinceClearMi < 60) || (s.warmupsSinceClear != null && s.warmupsSinceClear < 5);
     const notReady = st ? st.monitors.filter((m) => !m.complete) : [];
     if (recent) add(notReady.length >= 2 ? 'hard' : 'soft', 'Codes cleared recently',
@@ -630,6 +651,7 @@
     const codes = [...new Set([...(s.stored || []), ...(s.pending || []), ...(s.permanent || [])])];
     const trans = codes.filter((c) => /^P0(7|8)/.test(c));
     if (trans.length) add('hard', 'Transmission code' + (trans.length > 1 ? 's' : ''), trans.join(', '));
+    (m.walkCodes || []).forEach((w) => { const hit = codes.filter((c) => new RegExp(w.re).test(c)); if (hit.length) add('hard', w.title + (hit.length > 1 ? 's' : ''), hit.join(', ') + '. ' + w.why); });
     const mods = (s.modules && s.modules.modules) || [];
     mods.forEach((m) => {
       if (!m.codes.length) return;
@@ -640,7 +662,7 @@
     const big = codes.filter((c) => OBD.fixFor(c).tier === '$$$' && !/^P0(7|8)/.test(c));
     if (big.length) add('soft', 'Big-ticket code' + (big.length > 1 ? 's' : ''), big.map((c) => c + ' ' + OBD.describeCode(c)).join('; '));
     const ia = rec.idleAssessment;
-    if (ia) ia.findings.forEach((f) => { if (f.level === 'problem' && /Misfire|Rough|lean|rich/i.test(f.title)) add('soft', f.title, ''); });
+    if (ia) ia.findings.forEach((f) => { if (f.level === 'problem' && /Misfire|Rough|lean|rich/i.test(f.title)) add(m.walkIdleMisfire && /Misfire/i.test(f.title) ? 'hard' : 'soft', f.title, ''); });
     const da = rec.driveAssessment;
     if (da) da.findings.forEach((f) => { if (f.level === 'problem') add(/flared|wavering/i.test(f.title) ? 'hard' : 'soft', f.title, ''); });
     if (rec.crankAssessment) rec.crankAssessment.findings.forEach((f) => { if (f.level === 'problem') add('soft', f.title, ''); });
@@ -664,7 +686,7 @@
     if (hard.length) { level = 'problem'; why = hard.map((f) => f.title).join(', ') + '.'; }
     else if (mb && mb.bid <= 0) { level = 'problem'; why = 'Recon and profit eat the whole expected sale price.'; }
     else if (soft.length || recon > 1000) { level = 'watch'; why = (soft.length ? soft.map((f) => f.title).join(', ') + '. ' : '') + (recon > 1000 ? 'About ' + money(recon) + ' in likely recon.' : ''); }
-    const checked = ['scan'];
+    const checked = [rec.noScan ? 'glasses only' : 'scan'];
     if (rec.idleAssessment) checked.push('idle'); if (rec.driveAssessment) checked.push(m.driveName.toLowerCase()); if (rec.crankAssessment) checked.push('battery');
     return { level, word: words[level], why: why.trim(), flags, mb, checked, driveDone: !!rec.driveAssessment, m };
   }
@@ -732,6 +754,181 @@
     updateHist(rec);
     if (current.scan) { $('salePrice').value = sale; renderBid(); renderCall(); show($('callCard')); }
     toast('Expected sale price ' + money(sale) + ' from SCOUT.');
+    if (current.scan) sayCall();
+  }
+
+  /* ---------- glasses (glasses.js): read glasses photos/videos with Claude, talk in your ear ---------- */
+  function blankRecord() {
+    return { id: Date.now().toString(36), at: new Date().toISOString(), mode: M.id, demo: false, tech: settings.name || '',
+      vin: '', stock: $('stock').value.trim().toUpperCase(), miles: +$('miles').value || null, milesSource: $('miles').value ? 'dash' : null, noScan: true,
+      scan: { stored: [], pending: [], permanent: [], status: null }, assessment: { overall: 'good', findings: [] },
+      idle: null, idleAssessment: null, decoded: null, sent: null, estimate: { lines: [], removed: [] } };
+  }
+  // The glasses can start a record before the scanner is plugged in; a scan later takes it over (see scan()).
+  function glassRecord() { if (!current || current.mode !== M.id) current = blankRecord(); return current; }
+  function applyRead(rec, vin, miles, lane) {
+    const v = G.cleanVin(vin), good = v.length === 17 && G.vinValid(v);
+    let differs = false;
+    if (good) {
+      if (!rec.vin) { rec.vin = v; if (M.stockFromVin && !rec.stock) rec.stock = OBD.stockFromVin(v) || ''; }
+      else differs = rec.vin !== v;
+    }
+    if (lane && !rec.stock && !M.stockFromVin) rec.stock = String(lane).trim();
+    if (miles && (!rec.miles || rec.milesSource === 'truck')) { rec.miles = +miles; rec.milesSource = 'dash'; if (rec === current) $('miles').value = rec.miles; }
+    if (rec === current && rec.stock) $('stock').value = rec.stock;
+    return { v, good, differs };
+  }
+  let heard = [];
+  function walkText(rec) {
+    const t = ['Frames from the walkaround video, in order, then any photos.'];
+    if (rec && rec.decoded) t.push('The scanner says this is a ' + rec.decoded.label + '.');
+    if (rec && rec.vin) t.push('VIN from the truck’s computer: ' + rec.vin + '.');
+    if (rec && !rec.noScan) { const c = codesOf(rec); if (c.length) t.push('Trouble codes already found by the scanner (don’t add recon lines for these): ' + c.join(', ') + '.'); }
+    if (heard.length) t.push('What the tech said out loud while recording: “' + heard.join('. ') + '”');
+    return t.join(' ');
+  }
+  async function readGlasses(files) {
+    const g = M.glasses; if (!g || !files || !files.length) return;
+    err($('glassErr'), '');
+    if (!settings.claudeKey) { err($('glassErr'), 'Add your Claude API key in Settings (gear at the top) first.'); return; }
+    if (busy) { toast('Finish the current check first.'); return; }
+    const vid = [...files].some((f) => /^video\//.test(f.type));
+    show($('glassProgress')); $('glassBar').style.width = '5%';
+    $('glassStep').textContent = vid ? 'Pulling pictures from the video…' : 'Getting the photo ready…';
+    try {
+      const frames = await G.framesFrom(files, { maxFrames: 20, onProgress: (f) => { $('glassBar').style.width = Math.round(5 + f * 45) + '%'; } });
+      $('glassBar').style.width = '55%';
+      $('glassStep').textContent = 'Claude is looking at ' + frames.length + ' picture' + (frames.length > 1 ? 's' : '') + '…';
+      const rec0 = current && current.mode === M.id ? current : null;
+      const out = await G.ask(settings.claudeKey, { system: g.prompt, text: g.kind === 'walkaround' ? walkText(rec0) : 'Read these photos.', images: frames, tool: G.TOOLS[g.kind] });
+      $('glassBar').style.width = '100%'; $('glassStep').textContent = 'Done.';
+      if (g.kind === 'walkaround') takeWalk(out, frames.length); else takePhoto(out);
+    } catch (e) {
+      err($('glassErr'), e.message === 'NO_KEY' ? 'Add your Claude API key in Settings (gear at the top) first.' : 'Couldn’t read it: ' + e.message);
+      G.say('Couldn’t read that. Check the phone.');
+    } finally { setTimeout(() => show($('glassProgress'), false), 600); $('glassFiles').value = ''; }
+  }
+  const spell = (s) => String(s).split('').join(' ');
+  function afterGlasses(rec) {
+    if (rec.vin && !rec.decoded) decodeVin(rec);
+    show($('sendCard')); renderEstimate();
+    if (isBid()) { renderBid(); renderCall(); }
+    if (isMonday() && !rec.sent) lookupMatch();
+    saveHist(rec);
+  }
+  function takeWalk(out, n) {
+    const rec = glassRecord();
+    const r = applyRead(rec, out.vin, out.odometer);
+    rec.walk = { at: new Date().toISOString(), frames: n, summary: out.summary || '',
+      areas: (out.areas || []).filter((a) => G.AREAS.includes(a.area)), recon: (out.recon || []).filter((x) => x && x.item).slice(0, 12),
+      heard: heard.slice(), vinRead: r.v, vinDiffers: r.differs };
+    heard = [];
+    afterGlasses(rec); renderGlass(rec);
+    const need = rec.walk.areas.filter((a) => a.seen && !a.ok).length;
+    G.say([rec.walk.summary,
+      rec.stock ? 'Stock ' + spell(rec.stock) + '.' : 'Couldn’t read the VIN. Type the stock number.',
+      need ? need + ' area' + (need > 1 ? 's' : '') + ' need attention.' : '',
+      rec.walk.recon.length ? rec.walk.recon.length + ' recon line' + (rec.walk.recon.length > 1 ? 's' : '') + ' added to the estimate.' : ''].filter(Boolean).join(' '));
+  }
+  function takePhoto(out) {
+    const rec = glassRecord();
+    const r = applyRead(rec, out.vin, out.miles, out.lane);
+    rec.photo = { at: new Date().toISOString(), vehicle: out.vehicle || '', vinRead: r.v, vinDiffers: r.differs,
+      flags: (out.flags || []).filter((f) => f && f.title).map((f) => ({ title: f.title, hard: !!f.hard })) };
+    afterGlasses(rec); renderGlass(rec);
+    if (rec.vin && M.scout) { try { navigator.clipboard.writeText(rec.vin).catch(() => {}); } catch (e) {} }
+    G.say((out.say || '') + (rec.vin ? (M.scout ? ' VIN ready for SCOUT.' : '') : ' Couldn’t read the VIN.'));
+    $('callCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function renderGlass(rec) {
+    const ul = $('glassList'); ul.textContent = '';
+    const li = (level, title, detail) => { const l = document.createElement('li'); l.className = level; const d = document.createElement('div');
+      const b = document.createElement('b'); b.textContent = title; d.appendChild(b);
+      if (detail) { const sp = document.createElement('span'); sp.textContent = detail; d.appendChild(sp); } l.appendChild(d); ul.appendChild(l); };
+    const src = rec.walk || rec.photo;
+    if (!src) { show($('glassResult'), false); return; }
+    $('glassSummary').textContent = rec.walk ? rec.walk.summary : (rec.photo.vehicle || 'Photo read.');
+    if (src.vinDiffers) li('problem', 'Glasses read a different VIN', src.vinRead + ' vs ' + rec.vin + ' from the truck. Check the door sticker.');
+    else if (src.vinRead && rec.vin === src.vinRead) li('good', 'VIN ' + rec.vin, M.stockFromVin && rec.stock ? 'Stock # ' + rec.stock : '');
+    else if (!rec.vin) li('watch', 'VIN not readable', 'Get a close photo of the door jamb sticker, or type the ' + M.stockLabel + '.');
+    if (rec.photo) rec.photo.flags.forEach((f) => li(f.hard ? 'problem' : 'watch', f.title, ''));
+    if (rec.walk) {
+      const order = (a) => (!a.seen ? 2 : a.ok ? 1 : 0);
+      rec.walk.areas.slice().sort((a, b) => order(a) - order(b)).forEach((a) => li(!a.seen ? 'info' : a.ok ? 'good' : 'watch', a.area + (!a.seen ? ': not seen' : ''), a.note));
+      if (rec.walk.recon.length) li('info', rec.walk.recon.length + ' recon line' + (rec.walk.recon.length > 1 ? 's' : '') + ' added to the estimate', 'Change the amounts or remove them in step 5.');
+    }
+    show($('glassResult'));
+  }
+  function sayCall(rec) {
+    rec = rec || current; if (!rec || !isBid()) return;
+    const c = theCall(rec);
+    let t = c.word + '. ' + (c.level !== 'good' ? c.why.replace(/\.$/, '') + '. ' : '');
+    if (c.mb) t += M.resultName + ', ' + (c.mb.bid > 0 ? G.sayMoney(c.mb.bid) : 'none') + '.';
+    else if (M.scout) t += 'Get the sale price from SCOUT.';
+    G.say(t);
+  }
+
+  /* Talk me through it: the shot list in Dylan's ear while he records on the glasses */
+  let walkAbort = null, walkEar = null;
+  async function walkCoach() {
+    if (walkAbort) return;
+    heard = []; walkAbort = new AbortController();
+    show($('walkLive')); show($('walkCoachBtn'), false); $('walkStep').textContent = 'Start recording on the glasses';
+    let wake = null; try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    walkEar = G.listen((t) => { if (t) { heard.push(t); $('walkHeard').textContent = 'Heard: ' + heard.slice(-3).join(' · '); } });
+    $('walkHeard').textContent = walkEar ? 'Say what you see as you go (“dent on the tailgate”); it’s written down for Claude.' : '';
+    try {
+      await G.say('Say, Hey Meta, record a video. Starting in three seconds.');
+      await new Promise((r) => setTimeout(r, 3000));
+      const done = await G.coach(G.SHOTS, { signal: walkAbort.signal, onStep: (i, t) => { $('walkStep').textContent = (i + 1) + ' of ' + G.SHOTS.length + ': ' + t; } });
+      if (done) { toast('Pick the walkaround video once it shows up in your gallery.'); $('glassCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    } finally {
+      if (walkEar) walkEar.stop(); walkEar = null; walkAbort = null;
+      if (wake) try { wake.release(); } catch (e) {}
+      show($('walkLive'), false); show($('walkCoachBtn'));
+    }
+  }
+
+  /* Coach me (Trade): how to present the number, before Simon walks back to the desk.
+     Sends the vehicle facts and the math only: no customer name, deal # or notes. */
+  function coachFacts(rec, c) {
+    const L = [];
+    L.push('Vehicle: ' + ((rec.decoded && rec.decoded.label) || 'unknown') + (rec.miles ? ', ' + Math.round(rec.miles).toLocaleString() + ' miles' : '') + '.');
+    L.push('The call: ' + c.word + '. ' + c.why);
+    if (c.flags.length) L.push('Red flags: ' + c.flags.map((f) => f.title + (f.detail ? ' (' + f.detail + ')' : '')).join('; ') + '.');
+    const finds = (rec.assessment.findings || []).filter((f) => f.level !== 'good').slice(0, 8).map((f) => f.title);
+    if (finds.length) L.push('Scan findings: ' + finds.join('; ') + '.');
+    if (rec.driveAssessment) L.push('Test drive: ' + LEVEL_WORD[rec.driveAssessment.overall] + '.'); else L.push('No test drive yet.');
+    const lines = (rec.estimate && rec.estimate.lines) || [];
+    L.push('Recon to make it front-line ready: ' + money(estTotal(rec)) + (lines.length ? ' (' + lines.map((l) => l.label + ' ' + money(+l.amount || 0)).join('; ') + ')' : '') + '.');
+    L.push('Our expected retail sale price: ' + money(c.mb.sale) + '. Gross we need: ' + money(c.mb.profit) + (c.mb.fees ? '. Other costs: ' + money(c.mb.fees) : '') + '. Trade offer: ' + (c.mb.bid > 0 ? money(c.mb.bid) : 'none') + '.');
+    if (c.mb.equity != null) L.push('Customer payoff ' + money(c.mb.payoff) + (c.mb.equity >= 0 ? ', equity ' + money(c.mb.equity) : ', upside down ' + money(-c.mb.equity)) + '.');
+    L.push('Do not share our sale price, gross or recon dollar amounts with the customer; explain the offer in terms of the vehicle’s condition and what it needs.');
+    return L.join('\n');
+  }
+  function renderCoach(out) {
+    const box = $('coachBox'); box.textContent = '';
+    const p = (t, bold) => { const e = document.createElement('p'); if (bold) { const b = document.createElement('b'); b.textContent = t; e.appendChild(b); } else e.textContent = t; box.appendChild(e); return e; };
+    const list = (items) => { const ul = document.createElement('ul'); items.forEach((t) => { const l = document.createElement('li'); l.textContent = t; ul.appendChild(l); }); box.appendChild(ul); };
+    p(out.present || '');
+    if ((out.value_points || []).length) { p('Why the number', true); list(out.value_points.slice(0, 3)); }
+    if ((out.objections || []).length) { p('If they say…', true); list(out.objections.slice(0, 3).map((o) => '“' + o.they_say + '” → ' + o.you_say)); }
+    const again = document.createElement('button'); again.className = 'btn link'; again.textContent = 'Say it again';
+    again.onclick = () => G.say(out.say); box.appendChild(again);
+    show(box);
+  }
+  async function coachMe() {
+    const g = M.glasses, box = $('coachBox');
+    if (!current || !g || !g.coachPrompt) return;
+    if (!settings.claudeKey) { box.textContent = 'Add your Claude API key in Settings (gear at the top) first.'; show(box); return; }
+    const c = theCall(current);
+    if (!c.mb) { toast('Enter the ' + M.priceLabel.toLowerCase() + ' first.'); $('salePrice').focus(); return; }
+    box.textContent = 'Thinking…'; show(box); $('coachBtn').disabled = true;
+    try {
+      const out = await G.ask(settings.claudeKey, { system: g.coachPrompt, text: coachFacts(current, c), tool: G.TOOLS.coach, maxTokens: 1200 });
+      current.coach = out; updateHist(current); renderCoach(out); G.say(out.say);
+    } catch (e) { box.textContent = 'Couldn’t get coaching: ' + (e.message === 'NO_KEY' ? 'add your Claude API key in Settings.' : e.message); }
+    finally { $('coachBtn').disabled = false; }
   }
 
   /* ---------- quick appraisal and next vehicle ---------- */
@@ -744,7 +941,7 @@
       $('idleCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
       await runIdle(15);
     }
-    renderCall();
+    renderCall(); sayCall();
     $('callCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function keepFields() { if (current) { current.notes = $('notes').value.trim(); current.salePrice = +$('salePrice').value || current.salePrice || null; current.payoff = +$('payoff').value || null; saveHist(current); } }
@@ -754,7 +951,7 @@
     ['callCard', 'resultCard', 'idleCard', 'driveCard', 'sendCard', 'autoNote', 'idleResult', 'idleLive', 'driveResult', 'driveLive', 'crankLive', 'crankFindings', 'scoutHint'].forEach((id) => show($(id), false));
     show($('driveBtn')); $('driveBtn').textContent = 'Start ' + M.driveName.toLowerCase();
     $('miles').value = ''; $('notes').value = ''; $('salePrice').value = ''; $('payoff').value = ''; $('sendMsg').classList.add('hidden'); awaitingScout = false;
-    err($('scanErr'), '');
+    err($('scanErr'), ''); err($('glassErr'), ''); show($('glassResult'), false); show($('coachBox'), false);
     if (transport && transport.name === 'Demo') { OBD.DEMO_TRUCK.demoRunning = false; OBD.DEMO_TRUCK.driveAt = 0; }
   }
   function nextVehicle() {
@@ -801,7 +998,7 @@
       if (call.mb) L.push(m.resultName + ' math: sale ' + money(call.mb.sale) + ' \u2212 recon ' + money(call.mb.recon) + ' \u2212 ' + (m.id === 'trade' ? 'gross ' : 'profit ') + money(call.mb.profit) + (call.mb.fees ? ' \u2212 ' + esc(m.feesName.toLowerCase()) + ' ' + money(call.mb.fees) : '') + ' = ' + (call.mb.bid > 0 ? money(call.mb.bid) : 'none') +
         (call.mb.equity != null ? '. Payoff ' + money(call.mb.payoff) + ', ' + (call.mb.equity >= 0 ? 'equity ' + money(call.mb.equity) : 'upside down ' + money(-call.mb.equity)) : ''));
     }
-    L.push('<b>' + (cust ? 'Vehicle health check' : m.id === 'checkin' ? 'OBD2 check-in scan' : 'Scan health') + ': ' + esc(LEVEL_WORD[a.overall]) + '</b>');
+    L.push('<b>' + (cust ? 'Vehicle health check' : m.id === 'checkin' ? 'OBD2 check-in scan' : 'Scan health') + ': ' + (rec.noScan ? 'not scanned yet' : esc(LEVEL_WORD[a.overall])) + '</b>');
     L.push(esc(new Date(rec.at).toLocaleString()) + (rec.tech ? ' \u00b7 ' + esc(rec.tech) : ''));
     const info = [];
     if (rec.vin) info.push('VIN ' + esc(rec.vin));
@@ -811,6 +1008,13 @@
     const bt = bigTicket(rec);
     if (bt.any && !cust) L.push('<b>' + (m.id === 'checkin' ? 'OVER $1,000' + (bt.codes.length ? ' (' + esc(bt.codes.join(', ')) + ')' : '') + ': Jonathan decides fix, wholesale or sell as-is before work starts.' : 'LIKELY OVER $1,000 IN RECON' + (bt.codes.length ? ' (' + esc(bt.codes.join(', ')) + ')' : '') + '.') + '</b>');
     L.push('<ul>' + a.findings.map((f) => li(f, rec, !cust)).join('') + '</ul>');
+    if (rec.walk && !cust) {
+      const w = rec.walk;
+      L.push('<b>Glasses walkaround</b> (' + w.frames + ' pictures): ' + esc(w.summary));
+      L.push('<ul>' + w.areas.map((x) => '<li><b>' + (!x.seen ? 'NOT SEEN' : x.ok ? 'OK' : 'WATCH') + ':</b> ' + esc(x.area) + (x.note ? ' \u2014 ' + esc(x.note) : '') + '</li>').join('') + '</ul>');
+      if (w.heard && w.heard.length) L.push('<i>Said on the walkaround:</i> ' + esc(w.heard.join('. ')));
+    }
+    if (rec.photo && rec.photo.flags.length && !cust) L.push('<b>From the glasses photo:</b> ' + esc(rec.photo.flags.map((f) => f.title).join('; ')));
     if (rec.crankAssessment) L.push('<b>Cranking test:</b><ul>' + rec.crankAssessment.findings.map((f) => li(f, rec, !cust)).join('') + '</ul>');
     const dn = rec.drive && rec.drive.lane ? 'Lane drive' : 'Test drive';
     if (rec.driveAssessment) {
@@ -999,7 +1203,7 @@
         const celFindings = a.findings.filter((f) => /^[PCBU][0-9A-F]{4}|Check engine|cleared recently|self-tests not finished/i.test(f.title) && f.level !== 'good');
         const celOk = !(s.status && s.status.mil) && !celFindings.some((f) => f.level === 'problem') && !(s.stored || []).length && !(s.pending || []).length;
         const updates = [];
-        if (cel) {
+        if (cel && !rec.noScan) {
           const note = 'Scan ' + day + ': ' + (s.status && s.status.mil ? 'light ON. ' : 'light off. ') +
             ((s.stored || []).length ? 'Stored ' + s.stored.join(', ') + '. ' : '') + ((s.pending || []).length ? 'Pending ' + s.pending.join(', ') + '. ' : '') +
             (s.distSinceClearMi != null ? s.distSinceClearMi + ' mi since codes cleared.' : '');
@@ -1009,10 +1213,17 @@
           updates.push([cel, celOk ? 'Done' : 'Needs Attention', (note.trim() + (fixes ? '\n' + fixes : '')), parts]);
         }
         const batF = a.findings.find((f) => /Battery|charging|Overcharging/i.test(f.title));
-        if (bat && batF) updates.push([bat, batF.level === 'good' ? 'Done' : 'Needs Attention', 'Scan ' + day + ': ' + batF.title + '.']);
+        if (bat && batF && !rec.noScan) updates.push([bat, batF.level === 'good' ? 'Done' : 'Needs Attention', 'Scan ' + day + ': ' + batF.title + '.']);
+        // What the glasses saw goes on the matching walk-around item. Needs Attention when something was found;
+        // a clean look only adds a note, since a video can miss a chip or a slow leak.
+        if (rec.walk) for (const x of rec.walk.areas) {
+          if (!x.seen || !x.note) continue;
+          const sub = findSub(new RegExp('^walk-around:\\s*' + x.area.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'), 'i'));
+          if (sub) updates.push([sub, x.ok ? null : 'Needs Attention', 'Glasses ' + day + ': ' + x.note]);
+        }
         for (const [sub, label, note, parts] of updates) {
           const old = (sub.column_values.find((c) => c.id === SUB.notes) || {}).text || '';
-          const cv = {}; cv[SUB.status] = { label }; cv[SUB.notes] = { text: old ? old + '\n' + note : note };
+          const cv = {}; if (label) cv[SUB.status] = { label }; cv[SUB.notes] = { text: old ? old + '\n' + note : note };
           if (parts) {
             const oldParts = (sub.column_values.find((c) => c.id === SUB.parts) || {}).text || '';
             cv[SUB.parts] = oldParts ? oldParts + ', ' + parts : parts;
@@ -1107,7 +1318,7 @@
   /* ---------- settings ---------- */
   function openSettings() {
     const p = per();
-    $('techName').value = settings.name; $('token').value = settings.token; $('fillDefault').checked = settings.fill; $('testMsg').textContent = '';
+    $('techName').value = settings.name; $('token').value = settings.token; $('claudeKey').value = settings.claudeKey || ''; $('talkOn').checked = settings.talk !== false; $('fillDefault').checked = settings.fill; $('testMsg').textContent = '';
     $('minProfit').value = p.minProfit; $('feesTransport').value = p.fees || '';
     const sel = $('keepDays'); sel.textContent = '';
     const opts = [...new Set([...(M.keepOptions || [M.keepDays]), p.keepDays])].sort((a, b) => a - b);
@@ -1119,7 +1330,8 @@
     const pm = Object.assign({}, settings.per[M.id]);
     if (isBid()) { pm.minProfit = $('minProfit').value === '' ? M.minProfit : +$('minProfit').value; pm.fees = +$('feesTransport').value || 0; }
     pm.keepDays = +$('keepDays').value || M.keepDays;
-    settings = Object.assign(settings, { name: $('techName').value.trim(), token: $('token').value.trim(), fill: $('fillDefault').checked });
+    settings = Object.assign(settings, { name: $('techName').value.trim(), token: $('token').value.trim(), fill: $('fillDefault').checked, claudeKey: $('claudeKey').value.trim(), talk: $('talkOn').checked });
+    G.setVoice(settings.talk);
     settings.per[M.id] = pm;
     store.set(LS.settings, settings);
     purgeOld(); renderHist(); updateSetup();
@@ -1129,6 +1341,7 @@
     const needToken = isMonday() && !settings.token;
     show($('setupCard'), needToken || store.get(LS.port, null) == null);
     $('setupToken').style.opacity = needToken ? 1 : .5;
+    show($('glassSetup'), !!M.glasses && !settings.claudeKey);
   }
 
   /* ---------- wire up ---------- */
@@ -1152,7 +1365,7 @@
   document.addEventListener('visibilitychange', backFromScout);
   window.addEventListener('hashchange', takeFromLink);
   $('salePrice').addEventListener('input', () => { if (current) { current.salePrice = +$('salePrice').value || null; renderBid(); renderCall(); } });
-  $('salePrice').addEventListener('change', () => { if (current) updateHist(current); });
+  $('salePrice').addEventListener('change', () => { if (current) { updateHist(current); if (current.salePrice) sayCall(); } });
   $('payoff').addEventListener('input', () => { if (current) { current.payoff = +$('payoff').value || null; renderBid(); renderCall(); } });
   $('payoff').addEventListener('change', () => { if (current) updateHist(current); });
   window.addEventListener('online', retryPending);
@@ -1172,6 +1385,10 @@
   };
   $('miles').addEventListener('change', () => { if (current) { current.miles = +$('miles').value || null; current.milesSource = 'dash'; renderScan(); renderCall(); updateHist(current); } });
   $('stock').addEventListener('change', () => { if (current) { current.stock = $('stock').value.trim().toUpperCase(); $('stock').value = current.stock; saveHist(); if (isMonday()) lookupMatch(); } });
+  $('glassFiles').addEventListener('change', (e) => readGlasses(e.target.files));
+  $('walkCoachBtn').onclick = walkCoach;
+  $('walkStop').onclick = () => { if (walkAbort) walkAbort.abort(); G.quiet(); };
+  $('coachBtn').onclick = coachMe;
   $('settingsBtn').onclick = openSettings;
   $('settings').addEventListener('close', saveSettings);
   $('testBtn').onclick = testToken;

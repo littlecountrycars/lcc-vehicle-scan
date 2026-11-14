@@ -131,6 +131,84 @@ async function testCopy(browser, base) {
   await ctx.close();
 }
 
+
+/* Glasses: Claude is faked here (no key, no cost). Checks that a glasses walkaround or photo fills the vehicle,
+   carries into the scan, flags what it should, and that coaching never sends the customer's name or deal #. */
+const DEMO_VIN = '1FTEW1EP4JFD00042';
+const FAKE = {
+  walkaround: { vin: DEMO_VIN, odometer: 133500, summary: 'Clean truck; rear tires worn and a dent in the tailgate.',
+    areas: [{ area: 'Tires', seen: true, ok: false, note: 'Both rears about 3/32, fronts OK' }, { area: 'Body / paint condition', seen: true, ok: false, note: 'Dent, tailgate center' },
+      { area: 'Windshield', seen: true, ok: true, note: 'No chips seen' }, { area: 'Interior condition', seen: false, ok: true, note: '' }],
+    recon: [{ item: 'Two rear tires', low: 260, high: 400 }, { item: 'PDR tailgate dent', low: 125, high: 250 }] },
+  photo: { vin: DEMO_VIN, lane: '214', miles: 133500, vehicle: '2018 Ford F-150 XLT', flags: [{ title: 'Frame damage announced', hard: true }], say: 'Lane 214, 2018 F-150 XLT, frame damage announced.' },
+  coach: { say: 'Lead with the misfire.', present: 'Walk them through the scan first.', value_points: ['Misfire on cylinder 3'], objections: [{ they_say: 'KBB says more', you_say: 'That assumes it runs right.' }] }
+};
+async function glasses(browser, base) {
+  console.log('\nglasses');
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = [], claude = [], monday = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.route(/nhtsa\.(dot\.)?gov|fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await page.route('https://api.monday.com/**', (r) => { monday.push(r.request().url()); r.abort(); });
+  await page.route('https://api.anthropic.com/**', (r) => {
+    const body = JSON.parse(r.request().postData()); claude.push({ body, headers: r.request().headers() });
+    const name = body.tool_choice.name;
+    r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ content: [{ type: 'tool_use', id: 't1', name, input: FAKE[name] }] }) });
+  });
+  await page.goto(base + 'tests/blank.html');
+  await page.evaluate(() => localStorage.setItem('lccVS.settings', JSON.stringify({ name: 'Simon', token: '', claudeKey: 'sk-test', talk: false, per: {} })));
+  const photo = { name: 'glasses.png', mimeType: 'image/png', buffer: fs.readFileSync(path.join(ROOT, 'icon-512.png')) };
+
+  // Check-In: walkaround before the scanner, then the scan takes it over
+  await page.goto(base + '?mode=checkin');
+  ok(await page.isVisible('#glassCard'), 'Check-In shows the glasses walkaround');
+  await page.setInputFiles('#glassFiles', photo);
+  await page.waitForSelector('#glassResult:not(.hidden)', { timeout: 20000 });
+  const req = claude[0];
+  ok(req && req.headers['x-api-key'] === 'sk-test' && req.body.messages[0].content[0].type === 'image', 'sends the picture to Claude with the phone’s key');
+  ok((await page.inputValue('#stock')) === 'D00042', 'stock # from the VIN the glasses read: ' + await page.inputValue('#stock'));
+  ok((await page.inputValue('#miles')) === '133500', 'miles from the odometer the glasses read');
+  ok(/Two rear tires/.test(await page.textContent('#estLines')), 'walkaround recon lines in the Day-1 estimate');
+  ok(await page.isVisible('#sendBtn'), 'can send a walkaround to monday.com without a scan');
+  if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'glasses-walkaround.png'), fullPage: true });
+  await page.click('#demoBtn'); await page.waitForSelector('#connPill.demo');
+  await page.click('#scanBtn'); await page.waitForSelector('#resultCard:not(.hidden)', { timeout: 90000 });
+  ok(/Two rear tires/.test(await page.textContent('#estLines')), 'scan keeps the walkaround lines');
+  const hist = await page.evaluate(() => JSON.parse(localStorage.getItem('lccVS.history')));
+  ok(hist.filter((r) => r.mode === 'checkin').length === 1 && hist[0].walk && !hist[0].noScan, 'one record: scan + walkaround');
+
+  // Auction: photo flags, buy rules, nothing to monday.com
+  await page.goto(base + '?mode=auction');
+  await page.setInputFiles('#glassFiles', photo);
+  await page.waitForSelector('#callCard:not(.hidden)', { timeout: 20000 });
+  ok((await page.inputValue('#stock')) === '214', 'lane # from the run sheet');
+  ok(/walk away/i.test(await page.textContent('#callWord')), 'frame damage on the run sheet = Walk away');
+  await page.click('#demoBtn'); await page.waitForSelector('#connPill.demo');
+  await page.click('#quickBtn'); await page.waitForSelector('#idleResult:not(.hidden)', { timeout: 90000 });
+  await page.waitForTimeout(300);
+  const flags = await page.textContent('#flags');
+  ok(/Misfire code/.test(flags), 'buy rule: misfire code P0303 is a hard flag');
+  ok(/Frame damage/.test(flags), 'run-sheet flag carries into the scan');
+
+  // Trade: coach me sends no customer name, deal # or notes
+  await page.goto(base + '?mode=trade');
+  await page.fill('#stock', 'Smith deal 88');
+  await page.click('#demoBtn'); await page.waitForSelector('#connPill.demo');
+  await page.click('#quickBtn'); await page.waitForSelector('#callCard:not(.hidden)', { timeout: 90000 }); await page.waitForSelector('#idleResult:not(.hidden)', { timeout: 60000 });
+  await page.fill('#notes', 'Customer John Smith, 402-555-0100');
+  await page.fill('#salePrice', '24000'); await page.fill('#payoff', '9000');
+  await page.click('#coachBtn');
+  await page.waitForSelector('#coachBox:not(.hidden) li', { timeout: 20000 });
+  const coachReq = JSON.stringify(claude[claude.length - 1].body);
+  ok(/Trade offer/.test(coachReq) && !/Smith|402-555|deal 88/.test(coachReq), 'coaching gets the math, not the customer’s name, phone or deal #');
+  ok(/KBB says more/.test(await page.textContent('#coachBox')), 'coaching shown');
+  if (SHOTS) await page.locator('#callCard').screenshot({ path: path.join(SHOTS, 'glasses-coach.png') });
+  ok(monday.length === 0, 'glasses in Auction/Trade make no monday.com calls (' + monday.length + ')');
+  ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 (async () => {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://localhost:' + server.address().port + '/';
@@ -138,6 +216,7 @@ async function testCopy(browser, base) {
   try {
     await migration(browser, base);
     await testCopy(browser, base);
+    await glasses(browser, base);
     for (const m of (process.env.MODES || 'checkin auction trade').split(' ')) await runMode(browser, base, m);
   } catch (e) { console.log('  FAIL ' + e.message); failed++; }
   await browser.close(); server.close();
