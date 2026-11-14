@@ -32,19 +32,27 @@ When the session belongs to someone other than Dylan, use a branch and a pull re
 - **Auction** (`auction`): appraising at a physical auction, including vehicles we may not buy. Quick appraisal (scan + freeze frame + Ford modules + 15-second idle), the call (Bid / Caution / Walk away), max bid, next vehicle (bumps a numeric lane/run #), lane drive (~300 m, 35-45 mph; torque converter shudder can't be checked), lookups retried when signal returns. **Never touches monday.com.** Kept 8 days by default (the same unit can come back at next week's auction).
 - **Trade** (`trade`): Simon valuing a customer's trade at the desk. Quick appraisal, full test drive, the call (Good trade / Adjust offer / Wholesale only), trade offer, payoff and customer equity, a customer copy with no prices or internal notes. **Never touches monday.com.** Kept 30 days.
 
-Max bid / trade offer = expected sale price (typed, from SCOUT's expected sale price) − this vehicle's estimated recon − minimum profit/gross wanted (setting, default $2,500 per Jonathan) − fees/transport (setting, default $0). Don't use SCOUT's max bid as the input: SCOUT already subtracts its own typical recon and gross. Hard red flags (Walk away / Wholesale only): codes cleared recently with 2+ self-tests unfinished, odometer mismatch > 1,000 mi (typed dash vs computer), transmission codes, airbag faults, active transmission-module faults, slipping/shudder on the drive, or an offer at or below $0.
+Max bid / trade offer = expected sale price (typed, from SCOUT's expected sale price) − this vehicle's estimated recon − minimum profit/gross wanted (setting, default $2,500 per Jonathan) − fees/transport (setting, default $0). Don't use SCOUT's max bid as the input: SCOUT already subtracts its own typical recon and gross. Hard red flags (Walk away / Wholesale only): hard announcements from a glasses photo (title brand, frame, flood, odometer, airbag); in Auction, Jonathan's buy rules (misfire and camshaft codes, misfires on the idle check); codes cleared recently with 2+ self-tests unfinished, odometer mismatch > 1,000 mi (typed dash vs computer), transmission codes, airbag faults, active transmission-module faults, slipping/shudder on the drive, or an offer at or below $0.
 
 The mode is picked on first open and remembered per phone; tap the name at the top to switch. `?mode=checkin|auction|trade` in the link opens a mode (home-screen shortcuts use this). `#vin=<VIN>&sale=<price>` fills a sale price into a saved Auction/Trade appraisal (for a future SCOUT "send back" button).
 
 ## Files
 - `obd.js`: scanner engine. Transports (Web Serial classic Bluetooth, Web Bluetooth LE, demo truck), ELM327 commands, code parsing, idle/misfire, cranking test, freeze frame, Ford module codes (UDS 0x19), drive analysis (`assessDrive(r, before, after, { lane })`), fix/parts/cost table (`FIXES`), parts links (`SHOPS`).
 - `app.js`: screens, modes, estimate, red flags/call/offer, reports, share/PDF, monday.com (Check-In only), history, settings, migration from the old apps.
-- `modes/checkin.js`, `modes/auction.js`, `modes/trade.js`: each mode's wording and defaults.
+- `modes/checkin.js`, `modes/auction.js`, `modes/trade.js`: each mode's wording and defaults, including each mode's glasses wording and the instructions Claude gets (`glasses.prompt`, `glasses.coachPrompt`), and Auction's buy-rule codes (`walkCodes`).
+- `glasses.js`: Meta glasses support. Pulls frames from glasses videos/photos, sends them to Claude (each user's own API key, stored on the phone), the answer shapes (`TOOLS`), speaking through the glasses, the walkaround shot list (`SHOTS`). See `docs/GLASSES.md`.
 - `index.html`: layout and styles. Elements with `data-modes="..."`, `data-money="bid"`, `data-dest="monday|phone"` or `data-quick` show only where they apply.
 - `sw.js`: offline copy in this app's own IndexedDB database (`lcc-vehicle-scan`), never Cache Storage. Only handles its own folder.
 - `manifest.webmanifest`: home-screen install, with a shortcut per mode.
 - `tests/demo-test.js`: the demo-truck test. `.github/workflows/demo-test.yml` runs it.
 - `docs/HANDOFF-check-in-history.md`: the original Check-In Scan history (decisions, scanner troubleshooting). Its addresses refer to the old app.
+
+## Glasses (all modes)
+- Claude is called straight from the phone with the user's own key (`settings.claudeKey`, localStorage only; never commit a key). Model in `glasses.js` (`MODEL`).
+- A glasses read can start a record before the scanner is plugged in (`noScan: true`); the next scan of the same VIN takes it over (`walk`, `photo`, sale price, notes carry across).
+- Check-In: walkaround areas fill the matching `Walk-around: ...` subitems on send (Needs Attention only when something was found). Auction/Trade glasses never touch monday.com.
+- Trade coaching sends vehicle facts and the math only: never the deal #, notes or customer details. The test checks this.
+- Details, setup and the version 2 plan: `docs/GLASSES.md`.
 
 ## Saved on the phone
 - localStorage keys `lccVS.*` only (`settings`, `history`, `lastTransport`, `mode`, `migrated`). Never read or clear other apps' keys, except the one-time read of `lccScan.*` (Check-In) and `lccAcq.*` (Acquisition) on first open, which copies the monday token, name, Auction profit/fees and both histories. The old keys are left in place.

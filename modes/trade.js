@@ -40,6 +40,17 @@
   customerCopy: true,            // a plain summary for the customer, without our numbers
   scout: true,
 
+  // Glasses (glasses.js): photo of the door sticker or dash, and coaching before Simon goes back to the desk
+  glasses: {
+    kind: 'photo',
+    title: 'Glasses photo',
+    intro: 'Photo of the door jamb sticker or the dash on the glasses, then pick it here. It fills in the VIN and miles so you can open SCOUT before the scanner is even plugged in.',
+    pick: 'Pick glasses photo',
+    prompt: 'You are helping the salesman at Little Country Cars, a small used truck lot in Lincoln, Nebraska, value a customer\u2019s trade-in. The photos are from his smart glasses: the door jamb sticker, VIN plate, or the dash. Read the VIN only if every character is clear. Read the miles from the odometer. Note any warning lights on the dash or damage you can see.',
+    coachBtn: 'Coach me on this number',
+    coachPrompt: 'You coach the salesman at Little Country Cars, a small used truck lot in Lincoln, Nebraska. Our style is low-key and conversational: a handshake, not a sales pitch. Be honest with the customer; never invent problems, never pressure, never talk down their vehicle beyond what the scan found. Help him present the trade number so it makes sense to the customer: tie it to what the scan and drive actually found and what it takes to make the vehicle front-line ready. Keep it short and practical; he reads it on his phone or hears it in his ear before walking back to the desk.'
+  },
+
   destination: 'phone',
   keepDays: 30,
   keepOptions: [8, 30, 90]

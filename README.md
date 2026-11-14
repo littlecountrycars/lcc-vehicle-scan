@@ -8,6 +8,7 @@ Little Country Cars' scan app for the Veepeak Bluetooth OBD2 scanner, on an Andr
 
 Open https://littlecountrycars.github.io/lcc-vehicle-scan/ in Chrome → ⋮ → Add to Home screen. Pick your mode the first time; tap the name at the top to switch.
 
+- **Meta glasses:** walkaround videos (Check-In), run sheet/VIN photos (Auction), door sticker photos and coaching (Trade), read by Claude and spoken in your ear. Setup: `docs/GLASSES.md`.
 - Read-only: it never clears codes.
 - No keys or customer data live here. A monday.com token is stored only on the phone that uses it.
 - How the code is laid out, who owns what, and how to make changes: see `CLAUDE.md`.

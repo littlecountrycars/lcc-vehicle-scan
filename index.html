@@ -136,9 +136,10 @@ ul.est li button { width: 40px; height: 40px; border-radius: 8px; border: 1px so
 .esttotal { display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid var(--fg); padding-top: 8px; font-weight: 700; }
 .esttotal .kpi { font-size: 30px; }
 .toast { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); background: var(--fg); color: var(--bg); padding: 12px 14px; border-radius: 10px; z-index: 20; font-size: 14px; }
+#coachBox p { margin: 0; font-size: 15px; } #coachBox ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; }
 .foot { text-align: center; font-size: 12px; color: var(--muted); padding: 8px 16px; }
 @media print {
-  #nextTop, #nextBtn, #scoutBtn, #scoutCallBtn, #scoutHint, #quickBtn, #custBtn, #modeBtn .caret, #helpBox { display: none !important; }
+  #nextTop, #nextBtn, #scoutBtn, #scoutCallBtn, #scoutHint, #quickBtn, #custBtn, #glassCard, #coachBtn, #coachBox, #modeBtn .caret, #helpBox { display: none !important; }
   .top .iconbtn, .pill, .noprint, #connectCard, .card .btn, #estBox .row, #sendCard textarea, #sendCard .check, #matchBox, #newBox, #searchBox, #histCard, .foot, .parts a, #driveIntro, #idleIntro { display: none !important; }
   body { background: #fff; color: #000; } .card { border: 1px solid #ccc; break-inside: avoid; }
   .verdict { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -231,6 +232,31 @@ select.sel { width: 100%; border: 1px solid var(--line); background: var(--bg); 
     <div id="scanErr" class="notice err hidden" role="alert" style="margin-top:12px"></div>
   </section>
 
+  <section id="glassCard" class="card">
+    <h2><svg viewBox="0 0 32 16" width="30" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="2" y="3" width="11" height="9" rx="3"/><rect x="19" y="3" width="11" height="9" rx="3"/><path d="M13 6.5h6"/></svg><span id="glassTitle">Glasses</span></h2>
+    <p id="glassIntro" class="muted small" style="margin:0 0 12px"></p>
+    <label class="btn primary block" for="glassFiles" id="glassPick">Pick from gallery</label>
+    <input id="glassFiles" type="file" accept="video/*,image/*" multiple class="hidden">
+    <div id="coachRow" class="hidden" style="margin-top:8px">
+      <button id="walkCoachBtn" class="btn block">Talk me through the walkaround</button>
+      <div id="walkLive" class="hidden" style="margin-top:8px; display:grid; gap:6px">
+        <span id="walkStep" class="kpi" style="font-size:22px"></span>
+        <span id="walkHeard" class="muted small"></span>
+        <button id="walkStop" class="btn link">Stop</button>
+      </div>
+    </div>
+    <div id="glassProgress" class="progress hidden" style="margin-top:12px" aria-live="polite">
+      <div class="bar"><i id="glassBar"></i></div>
+      <span id="glassStep" class="muted small"></span>
+    </div>
+    <div id="glassErr" class="notice err hidden" role="alert" style="margin-top:12px"></div>
+    <div id="glassResult" class="hidden" style="margin-top:12px">
+      <p id="glassSummary" style="margin:0 0 8px; font-weight:700"></p>
+      <ul id="glassList" class="findings"></ul>
+    </div>
+    <p id="glassSetup" class="muted small hidden" style="margin:10px 0 0">Add your Claude API key in Settings (gear at the top) to use the glasses.</p>
+  </section>
+
   <section id="callCard" class="card callcard hidden" aria-live="polite">
     <div class="call"><span id="callWord" class="word"></span><span id="callWho" class="who"></span></div>
     <p id="callWhy" style="margin:6px 0 0"></p>
@@ -240,6 +266,10 @@ select.sel { width: 100%; border: 1px solid var(--line); background: var(--bg); 
     <div class="row" style="margin-top:12px">
       <button id="scoutCallBtn" class="btn primary" style="flex:1">Sale price from SCOUT</button>
       <button id="nextTop" class="btn" style="flex:1">Next vehicle</button>
+    </div>
+    <div data-modes="trade" style="margin-top:8px">
+      <button id="coachBtn" class="btn block">Coach me on this number</button>
+      <div id="coachBox" class="hidden" style="margin-top:10px; display:grid; gap:8px"></div>
     </div>
     <p id="scoutHint" class="muted small hidden" style="margin:8px 0 0">VIN copied. In SCOUT, paste it into Check a truck, then come back here and type SCOUT's <b>expected sale price</b>. This app takes off this vehicle's recon and your profit.</p>
   </section>
@@ -328,7 +358,7 @@ select.sel { width: 100%; border: 1px solid var(--line); background: var(--bg); 
         <div class="row"><input id="searchQ" type="text" placeholder="Search the board by name" style="flex:1"><button id="searchBtn" class="btn">Search</button></div>
         <ul id="searchResults" class="hist"></ul>
       </div>
-      <label class="check" style="margin-top:12px"><input id="fillSubs" type="checkbox" checked><span>Also fill in the <b>Check engine light</b> and <b>Battery</b> walk-around items (status, notes, parts needed)</span></label>
+      <label class="check" style="margin-top:12px"><input id="fillSubs" type="checkbox" checked><span>Also fill in the walk-around items: <b>Check engine light</b>, <b>Battery</b>, and whatever the glasses saw (status, notes, parts needed)</span></label>
       <div class="row" style="margin-top:12px">
         <button id="sendBtn" class="btn primary" style="flex:1" disabled>Send to monday.com</button>
         <button id="printBtnM" class="btn">Save PDF</button>
@@ -379,6 +409,13 @@ select.sel { width: 100%; border: 1px solid var(--line); background: var(--bg); 
       <div class="row"><button id="testBtn" type="button" class="btn">Test connection</button><span id="testMsg" class="muted small"></span></div>
       <label class="check"><input id="fillDefault" type="checkbox" checked><span>Fill in walk-around items by default</span></label>
     </div>
+    <div style="display:grid; gap:12px">
+      <label class="f">Claude API key (for the glasses)
+        <input id="claudeKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+      </label>
+      <span class="muted small">Jonathan gives you this. It's saved only on this phone. Glasses photos and videos go to Claude to be read, and nowhere else.</span>
+      <label class="check"><input id="talkOn" type="checkbox" checked><span>Talk to me (plays in the glasses when they're connected to this phone)</span></label>
+    </div>
     <div data-money="bid" style="display:grid; gap:12px">
       <label class="f"><span id="profitLabel">Minimum profit after recon</span><input id="minProfit" type="number" inputmode="numeric" placeholder="2500"></label>
       <label class="f"><span id="feesLabel">Buyer fee + transport per vehicle</span><input id="feesTransport" type="number" inputmode="numeric" placeholder="0"></label>
@@ -399,6 +436,7 @@ select.sel { width: 100%; border: 1px solid var(--line); background: var(--bg); 
 <script src="modes/checkin.js"></script>
 <script src="modes/auction.js"></script>
 <script src="modes/trade.js"></script>
+<script src="glasses.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
